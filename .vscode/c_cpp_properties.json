@@ -1,0 +1,22 @@
+{
+    "configurations": 
+    [
+        {
+            "name": "gd_c_cpp_properties",
+            //"compilerPath": "usr/bin/riscv64-unknown-elf-gcc",
+            "includePath": 
+            [
+                "${workspaceRoot}/inc/",
+                "${workspaceRoot}/lib/"                    
+            ],
+            "defines":
+            [
+                "GD32VF103xx"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
