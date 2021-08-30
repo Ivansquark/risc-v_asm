@@ -16,9 +16,9 @@
 
 #_____________ USART0 ______________________________
 .equ ECLIC_ADDR_BASE, 0xd2000000
-.equ ECLIC_INT_IP_OFFSET, 0x1000
-.equ ECLIC_INT_IE_OFFSET, 0x1001
-.equ ECLIC_INT_ATTR_OFFSET, 0x1002
+.equ ECLIC_INT_IP_OFFSET, 0x1000    # pending
+.equ ECLIC_INT_IE_OFFSET, 0x1001    # interrupt enable
+.equ ECLIC_INT_ATTR_OFFSET, 0x1002  # attribute (Vector or nonvector) 
 .equ USART0_IRQn, 56
 
 .equ RCU_APB2EN_AFEN, (1<<0)
@@ -53,6 +53,72 @@
 .macro pop val
   lw \val, 0(sp)
   addi sp, sp, 4
+.endm
+
+#Save caller registers
+.macro SAVE_CONTEXT
+    addi sp, sp, -64
+    sw x1,  0(sp)
+    sw x5,  4(sp)
+    sw x6,  8(sp)
+    sw x7,  12(sp)
+    sw x10, 16(sp)
+    sw x11, 20(sp)
+    sw x12, 24(sp)
+    sw x13, 28(sp)
+    sw x14, 32(sp)
+    sw x15, 36(sp)
+    sw x16, 40(sp)
+    sw x17, 44(sp)
+    sw x28, 48(sp)
+    sw x29, 52(sp)
+    sw x30, 56(sp)
+    sw x31, 60(sp)
+.endm
+
+#restore caller registers
+.macro RESTORE_CONTEXT
+    lw x1,  0(sp)
+    lw x5,  4(sp)
+    lw x6,  8(sp)
+    lw x7,  12(sp)
+    lw x10, 16(sp)
+    lw x11, 20(sp)
+    lw x12, 24(sp)
+    lw x13, 28(sp)
+    lw x14, 32(sp)
+    lw x15, 36(sp)
+    lw x16, 40(sp)
+    lw x17, 44(sp)
+    lw x28, 48(sp)
+    lw x29, 52(sp)
+    lw x30, 56(sp)
+    lw x31, 60(sp)
+    addi sp, sp, 64
+.endm
+
+# Save the mepc and mstatus
+#
+.macro SAVE_EPC_STATUS
+  csrr x5, CSR_MEPC  
+  push x5
+  csrr x5, CSR_MSTATUS  
+  push x5
+  csrr x5, CSR_MSUBM  
+  push x5
+.endm
+
+###############################################
+###############################################
+# Restore the mepc and mstatus
+#
+.macro RESTORE_EPC_STATUS
+  pop x5
+  csrw CSR_MEPC, x5  
+  pop x5
+  csrw CSR_MSTATUS, x5  
+  pop x5
+  csrw CSR_MSUBM, x5  
 .endm
 
 .text
@@ -93,20 +159,27 @@ main:
   la t0, USART0_BASE
   li t1, (8000000 - 4800) / 9600
   sw t1, USART_BAUD_OFFSET(t0)
-  li t1, USART_CTL0_UEN | USART_CTL0_REN | USART_CTL0_TEN | USART_CTL0_RBNEIE
+  li t1, USART_CTL0_UEN | USART_CTL0_REN | USART_CTL0_TEN | USART_CTL0_RBNEIE #| USART_CTL0_TBEIE
   sw t1, USART_CTL0_OFFSET(t0)
 
-  # Локальное разрешение прерывания USART0 (eclic_int_ie[i] = 1)
+
+  
+  la t0,  CSR_MTVEC
+  la t1, 0xFFFFFFC0
+  and t0, t0, t1
+  ori t0, t0, 3
+  csrw CSR_MTVEC, t0  # set eclic 
+   # vectorized interrupt number (eclic_int_attr[i] = 1)
+  la t0, (ECLIC_ADDR_BASE + ECLIC_INT_ATTR_OFFSET + USART0_IRQn*4)
+    la t1, 1
+  sb t1, 0(t0)
+  # INTERRUPT ENABLE USART0 IE (eclic_int_ie[i] = 1)
   la t0, (ECLIC_ADDR_BASE + ECLIC_INT_IE_OFFSET + USART0_IRQn*4)
     la t1, 1
   sb t1, 0(t0)
-  # Использование векторизованного режима обработки (eclic_int_attr[i] = 1)
-  la t0, (ECLIC_ADDR_BASE+ECLIC_INT_ATTR_OFFSET+USART0_IRQn*4)
-    la t1, 1
-  sw t1, 0(t0)
+  #enable GLOBAL interrupts
+  csrrs zero, CSR_MSTATUS, MSTATUS_MIE  #(set interrupt)
 
-  #глобальное разрешение прерываний
-  csrrs zero, CSR_MSTATUS, MSTATUS_MIE
 
 MAIN_LOOP:
 
@@ -150,16 +223,41 @@ ret
 
 .global USART0_IRQn_handler
 USART0_IRQn_handler:
-  push t0
-  push a0
+  SAVE_CONTEXT
+  # la t0, USART0_BASE
+  # la a0, USART_CTL0_UEN | USART_CTL0_REN | USART_CTL0_TEN | USART_CTL0_RBNEIE | USART_CTL0_TBEIE
+  # sw a0, USART_CTL0_OFFSET(t0)
+  # la t0, USART0_BASE
+  # li t1, 'u'
+  lb t1, USART_DATA_OFFSET(t0)
+
   la t0, USART0_BASE
-  la a0, USART_CTL0_UEN | USART_CTL0_REN | USART_CTL0_TEN
-  sw a0, USART_CTL0_OFFSET(t0)
-  la a0, 'U'
-  sw a0, USART_DATA_OFFSET(t0)
-  while_loop:
-  la a6, while_loop
-  jalr 0(a6) 
-  pop a0
-  pop t0
+  sb t1, USART_DATA_OFFSET(t0)
+  #  while_loop:
+  #  la a6, while_loop
+  #  j while_loop
+  #jalr 0(a6) 
+  # pop a0
+  # pop t0
+
+  # la a5, GPIOC_BOP
+  # lw a4, 0(a5)
+  #   li a3, 1
+  #   slli a3, a3, 29
+  #   or a4, a4, a3
+  # sw a4, 0(a5)
+  
+  # la a0, 1000000
+  # call sleep
+
+  # la a5, GPIOC_BOP
+  # lw a4, 0(a5)
+  #   li a3, 1
+  #   slli a3, a3, 13
+  #   or a4, a4, a3
+  # sw a4, 0(a5)
+  # la a0, 1000000
+  # call sleep
+
+  RESTORE_CONTEXT
 mret

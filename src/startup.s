@@ -261,21 +261,38 @@ reset_handler:
   addi a0, a0, 0x18c   #16bits command   add to a0 8
   jr   a0             #go to _start
 _start:             # address 0x0800 0008    
-  csrc CSR_MSTATUS, MSTATUS_MIE # disable interrupt
+  #csrc CSR_MSTATUS, MSTATUS_MIE # disable interrupt (clear)
   la s1, _stack_end
   la s0, 0x20008000  
   bne s0, s1, _start  # check if PC on 0x0800....
   mv sp, s1
 
 #Set the vector table's base address.
-  la   a0, vtable
-  csrw CSR_MTVT, a0
+
+  /* Set the the NMI base to share with mtvec by setting CSR_MMISC_CTL */
+  #  li t0, 0x200
+  #  csrs CSR_MMISC_CTL, t0
+
+	/* Intial the mtvt*/
+    #la t0, vtable
+    lui t0, 0x08000
+    csrw CSR_MTVT, t0
+
+	/* Intial the mtvt2 and enable it*/
+    # la t0, irq_entry
+    # csrw CSR_MTVT2, t0
+    # csrs CSR_MTVT2, 0x1
+
+    /* Intial the CSR MTVEC for the Trap ane NMI base addr*/
+    # la t0, trap_entry
+    # csrw CSR_MTVEC, t0
 
   # Set non-vectored interrupts to use the default handler.
   # (That will gracefully crash the program,
   #  so only use vectored interrupts for now.)
-  la   a0, default_interrupt_handler
-  csrw CSR_MTVEC, a0
+  # la   a0, default_interrupt_handler
+  #ori a0, a0, 3
+  #csrw CSR_MTVEC, a0  # set eclic 
 #copy data section to RAM
   la a0, _data_load
   la a1, _sdata
@@ -300,7 +317,3 @@ clear_bss_end:
     nop    
     #jal  ra, main
     call main
-
-
-
-
